@@ -182,7 +182,7 @@ plain AMQP; no SDK is required.
 - **Immutable revisions.** Route config pins a skill revision. Retries and
   in-flight jobs keep the revision and workspace bound on first dispatch, even
   after `update`/`reload`.
-- **Atomic outcomes.** Result records and `queue.redb` are durable before the
+- **Atomic outcomes.** Result records and `queue.sqlite3` are durable before the
   delivery is acked. Outstanding retries are held by the daemon and requeued
   when due, not spun on.
 - **Concurrency.** Per-route `concurrency` and global `runtime.max_parallel_jobs`
@@ -259,8 +259,10 @@ agentqueue backup --output FILE [--with-workspaces] [--with-env]
 ```
 
 `backup` is offline: stop the daemon first. It writes mode `0600`; `.env` is
-excluded unless `--with-env`, workspaces unless `--with-workspaces`. Restore is
-a manual extraction into a stopped daemon home.
+excluded unless `--with-env`, workspaces unless `--with-workspaces`. The
+archive includes `state/queue.sqlite3` and any remaining WAL/SHM files. Restore
+is a manual extraction into a stopped daemon home; restore the SQLite files as a
+set and let the first Ante open recover WAL state.
 
 Exit codes: `0` success, `64` usage, `65` data/validation, `69` daemon or service
 unavailable, `70` internal, `73` filesystem create, `74` I/O, `75` busy/timeout

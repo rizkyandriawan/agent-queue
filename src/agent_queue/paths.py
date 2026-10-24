@@ -81,7 +81,7 @@ class Paths:
 
     @property
     def database(self) -> Path:
-        return self.state / "queue.redb"
+        return self.state / "queue.sqlite3"
 
     def ensure(self) -> None:
         self.home.mkdir(parents=True, exist_ok=True)

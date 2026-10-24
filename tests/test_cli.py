@@ -1,12 +1,16 @@
 import contextlib
 import io
 import json
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 
+from ante import Ante
+
 from agent_queue.cli import main
 from agent_queue.config import read_raw
+from agent_queue.paths import Paths
 
 
 class CliTests(unittest.TestCase):
@@ -105,6 +109,29 @@ class CliTests(unittest.TestCase):
         code, _, errors = self.run_cli("backup", "--output", str(output_path))
         self.assertEqual(code, 0, errors)
         self.assertTrue(output_path.is_file())
+
+    def test_backup_contains_a_restorable_sqlite_database(self):
+        self.run_cli("init")
+        paths = Paths(self.home)
+        paths.ensure()
+        with Ante.open(paths.database) as ante:
+            ante.declare("jobs")
+            ante.publish("jobs", "persisted")
+        self.assertEqual(paths.database.name, "queue.sqlite3")
+
+        output_path = self.root / "backup.tar.gz"
+        code, _, errors = self.run_cli("backup", "--output", str(output_path))
+        self.assertEqual(code, 0, errors)
+        with tarfile.open(output_path) as archive:
+            names = archive.getnames()
+            self.assertIn("state/queue.sqlite3", names)
+            archive.extractall(self.root / "restore", filter="data")
+
+        restored = self.root / "restore" / "state" / "queue.sqlite3"
+        with Ante.open(restored) as ante:
+            self.assertEqual(ante.info("jobs")["ready"], 1)
+            delivery = ante.take("jobs", max=1)
+            self.assertEqual(delivery[0].payload, "persisted")
 
     def test_remove_requires_confirmation_for_data(self):
         self.run_cli("init")

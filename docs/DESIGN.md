@@ -9,7 +9,7 @@ code is wrong or the document is stale; treat both as bugs.
 One Unix user runs one daemon for one home directory (default
 `~/.agentqueue`). The daemon owns:
 
-- the Ante database (`state/queue.redb`) and the AMQP listener;
+- the Ante database (`state/queue.sqlite3`) and the AMQP listener;
 - the control socket (`run/control.sock`);
 - route dispatch, retries, init, jobs, and logging.
 
@@ -53,7 +53,7 @@ $AGENTQUEUE_HOME/
 │   ├── active.json        # identity, generation, revision, completion time
 │   └── gen-<identity>/    # promoted init workspace
 ├── state/
-│   ├── queue.redb         # Ante: the delivery source of truth
+│   ├── queue.sqlite3      # Ante: the delivery source of truth
 │   ├── jobs/<job>.json    # convenience/audit records, never authoritative
 │   ├── daemon.lock        # single daemon owner
 │   └── config.lock        # serialized CLI config mutations
