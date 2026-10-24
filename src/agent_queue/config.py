@@ -24,6 +24,7 @@ LOG_FORMATS = {"json", "text"}
 class AmqpConfig:
     host: str = "127.0.0.1"
     port: int = 5672
+    security: str | None = None
 
 
 @dataclass(frozen=True)
@@ -121,7 +122,11 @@ class Config:
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
-            "amqp": {"host": self.amqp.host, "port": self.amqp.port},
+            "amqp": {
+                "host": self.amqp.host,
+                "port": self.amqp.port,
+                **({"security": self.amqp.security} if self.amqp.security else {}),
+            },
             "model": {
                 "name_env": self.model.name_env,
                 "api_key_env": self.model.api_key_env,
@@ -304,10 +309,16 @@ def parse_config(data: dict[str, Any]) -> Config:
             f"unsupported config version {version!r}; this build supports {SUPPORTED_VERSION}"
         )
 
-    amqp_data = _mapping(data.get("amqp"), "amqp", {"host", "port"})
+    amqp_data = _mapping(data.get("amqp"), "amqp", {"host", "port", "security"})
+    security = amqp_data.get("security")
+    if security is not None:
+        security = _string(security, "amqp.security")
+        if not security:
+            raise ConfigError("amqp.security must not be empty")
     amqp = AmqpConfig(
         host=_string(amqp_data.get("host", "127.0.0.1"), "amqp.host"),
         port=_int(amqp_data.get("port", 5672), "amqp.port", 0, 65535),
+        security=security,
     )
 
     model_data = _mapping(

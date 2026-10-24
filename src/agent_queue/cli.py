@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shutil
+import ssl
 import sys
 import tarfile
 import time
@@ -239,6 +240,13 @@ def build_parser() -> argparse.ArgumentParser:
     send.add_argument("--correlation-id")
     send.add_argument("--host")
     send.add_argument("--port", type=int)
+    send.add_argument("--tls-ca", help="trust this PEM CA and use TLS")
+    send.add_argument("--tls-server-name", help="certificate name (default: host)")
+    send.add_argument("--user", help="AMQP username (or AGENTQUEUE_AMQP_USER)")
+    send.add_argument(
+        "--password-file",
+        help="read the AMQP secret from a file (or AGENTQUEUE_AMQP_PASSWORD)",
+    )
 
     config = add("config", "validate or inspect effective configuration")
     config_sub = config.add_subparsers(dest="config_command")
@@ -572,6 +580,7 @@ def _command_status(args, paths: Paths) -> int:
     if daemon.get("amqp"):
         lines.append(
             f"AMQP: {daemon['amqp']['host']}:{daemon['amqp']['port']}  "
+            f"tls={daemon['amqp'].get('tls', False)}  "
             f"active={daemon.get('active_jobs')}/{daemon.get('max_parallel_jobs')}  "
             f"revision={daemon.get('active_revision')}"
         )
@@ -690,24 +699,70 @@ def _command_send(args, paths: Paths) -> int:
         raise CliError(64, "provide --message, --file, or --file=- for stdin")
     config, _ = _load(paths)
     host, port = args.host, args.port
+    explicit = host is not None or port is not None
+    secured = False
     if host is None or port is None:
         if daemon_online(paths):
             status = _request(args, paths, "status")
             address = status["daemon"].get("amqp") or {}
             host = host or address.get("host", config.amqp.host)
             port = port or address.get("port", config.amqp.port)
+            secured = bool(address.get("tls"))
         else:
             host = host or config.amqp.host
             port = port or config.amqp.port
+            secured = bool(config.amqp.security) and not explicit
+
+    ca = args.tls_ca or os.environ.get("AGENTQUEUE_AMQP_CA")
+    server_name = (
+        args.tls_server_name or os.environ.get("AGENTQUEUE_AMQP_SERVER_NAME") or host
+    )
+    user = args.user or os.environ.get("AGENTQUEUE_AMQP_USER")
+    password = None
+    if args.password_file:
+        try:
+            password = Path(args.password_file).read_text().rstrip("\r\n")
+        except OSError as error:
+            raise CliError(
+                66, f"read password file {args.password_file}: {error}"
+            ) from error
+    else:
+        password = os.environ.get("AGENTQUEUE_AMQP_PASSWORD")
+    if secured and not ca:
+        raise CliError(
+            64,
+            "the AMQP ingress is secured; pass --tls-ca (or set AGENTQUEUE_AMQP_CA)",
+        )
+    if secured and not user:
+        raise CliError(
+            64,
+            "the AMQP ingress requires credentials; pass --user "
+            "(or set AGENTQUEUE_AMQP_USER)",
+        )
+    if secured and password is None:
+        raise CliError(
+            64,
+            "the AMQP ingress requires a secret; pass --password-file "
+            "(or set AGENTQUEUE_AMQP_PASSWORD)",
+        )
     try:
         import pika
     except ImportError as error:
         raise CliError(
             69, "pika is required for `agentqueue send`; pip install pika"
         ) from error
+    parameters = {"host": host, "port": port}
+    if ca:
+        try:
+            context = ssl.create_default_context(cafile=ca)
+        except (OSError, ssl.SSLError) as error:
+            raise CliError(66, f"load CA file {ca}: {error}") from error
+        parameters["ssl_options"] = pika.SSLOptions(context, server_name)
+    if user:
+        parameters["credentials"] = pika.PlainCredentials(user, password or "")
     connection = None
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host, port))
+        connection = pika.BlockingConnection(pika.ConnectionParameters(**parameters))
         channel = connection.channel()
         channel.confirm_delivery()
         properties = pika.BasicProperties(
@@ -727,8 +782,16 @@ def _command_send(args, paths: Paths) -> int:
                 pass
     _emit(
         args,
-        {"topic": topic, "bytes": len(body), "host": host, "port": port},
-        f"Published {len(body)} bytes to {topic} at {host}:{port}",
+        {
+            "topic": topic,
+            "bytes": len(body),
+            "host": host,
+            "port": port,
+            "tls": bool(ca),
+            "user": user,
+        },
+        f"Published {len(body)} bytes to {topic} at {host}:{port}"
+        + (" over TLS" if ca else ""),
     )
     return 0
 

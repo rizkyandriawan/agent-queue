@@ -709,8 +709,16 @@ class Daemon:
                 target=self._control_loop, name="control", daemon=True
             )
             self._control_thread.start()
+            security_path = None
+            if self.config.amqp.security:
+                candidate = Path(self.config.amqp.security).expanduser()
+                if not candidate.is_absolute():
+                    candidate = self.paths.home / candidate
+                security_path = str(candidate)
             self.amqp_address = self.ante.serve_amqp(
-                self.config.amqp.host, self.config.amqp.port
+                self.config.amqp.host,
+                self.config.amqp.port,
+                security_path=security_path,
             )
             self._build_routes(self.config.routes, initial=True)
             if self.retries._thread.ident is None:
@@ -723,6 +731,7 @@ class Daemon:
                 logging.INFO,
                 "daemon.ready",
                 amqp=f"{self.amqp_address[0]}:{self.amqp_address[1]}",
+                tls=bool(self.config.amqp.security),
                 routes=len(self.routes),
                 revision=self.active_revision,
             )
@@ -962,11 +971,18 @@ class Daemon:
         for route in config.routes.values():
             load_skill(self.paths, route.skill, route.revision)
         warnings = []
-        if (config.amqp.host, config.amqp.port) != (
+        if (
+            config.amqp.host,
+            config.amqp.port,
+            config.amqp.security,
+        ) != (
             self.config.amqp.host,
             self.config.amqp.port,
+            self.config.amqp.security,
         ):
-            warnings.append("AMQP bind address changed; restart is required")
+            warnings.append(
+                "AMQP bind address or security configuration changed; restart is required"
+            )
         desired = _revision_of(config, config.routes)
         old_runner = self.runner
         old_init_revision = self.config.init.revision
@@ -1178,7 +1194,11 @@ class Daemon:
                 else 0,
                 "home": str(self.paths.home),
                 "amqp": (
-                    {"host": self.amqp_address[0], "port": self.amqp_address[1]}
+                    {
+                        "host": self.amqp_address[0],
+                        "port": self.amqp_address[1],
+                        "tls": bool(self.config and self.config.amqp.security),
+                    }
                     if self.amqp_address
                     else None
                 ),

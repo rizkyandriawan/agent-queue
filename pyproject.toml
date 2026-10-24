@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 dependencies = [
-  "ante-embedded @ git+https://github.com/rizkyandriawan/ante-python.git@046877f6a2fefc8d4dc7c2734b3466a2dcca84ed",
+  "ante-embedded @ git+https://github.com/rizkyandriawan/ante-python.git@0b1a63b",
   "agentscope==2.0.10",
   "python-dotenv>=1,<2",
   "pydantic>=2,<3",
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["coverage>=7", "ruff>=0.9"]
+dev = ["coverage>=7", "ruff>=0.9", "cryptography>=42"]
 
 [project.scripts]
 agentqueue = "agent_queue.cli:main"

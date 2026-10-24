@@ -221,6 +221,11 @@ These are the release gates. Each names the enforcement point.
 - **I-13 Control boundary.** The control socket is `0600`; commands are JSON with
   a version and validated arguments; filesystem ownership is the auth boundary.
   Enforcement: `_open_control`, `_handle_control`.
+- **I-13a Network ingress.** With `amqp.security` set, the embedded Ante listener
+  uses TLS, verifies Argon2id credentials, and applies default-deny,
+  queue-scoped permissions. There is no plaintext fallback in secure mode.
+  Enforcement: `Security::load`, `serve_secure_until_with_options`, and the
+  adapter authorization checks. Security configuration is loaded before bind.
 - **I-14 Private files.** Home and runtime directories are `0700`; `.env`, job
   records, backups, and the socket are `0600`/`0644` as appropriate. Enforcement:
   `paths`, `util.atomic_write`, `service.render_unit` (`UMask=0077`).
@@ -267,15 +272,23 @@ start recovers from the queue.
 | Crash after result publish before ack | duplicate result / re-execution | Idempotent skill/consumer dedupe |
 | Control socket path too long | fallback under `XDG_RUNTIME_DIR` or `/tmp` | Automatic |
 | AMQP port occupied | startup fails with exit 69/74 | Change port or stop the other process |
+| Invalid security file | startup fails before any listener binds | Fix cert/key/hash/ACL, restart |
+| Bad AMQP credentials | connection close 403; no queue mutation | Rotate credentials |
+| AMQP operation outside ACL | channel close 403; other channels usable | Grant the exact queue permission |
+| Plaintext client against secure listener | TLS handshake fails | Configure `amqps://` / `--tls-ca` |
 | Invalid config on reload | old config stays, `last_reload_error` set | Fix and reload |
 | Backup while daemon running | exit 75 | Stop daemon |
 | Delete skill data with active jobs | exit 75 | Wait, then remove |
 
 ## 9. Security boundaries
 
-- AMQP is loopback, unauthenticated, unencrypted. This is a local IPC boundary,
-  not a network service. Ante's adapter allows any connected client to consume or
-  purge; there is no restricted ingress profile yet. Do not expose the port.
+- The legacy AMQP profile is loopback, unauthenticated, unencrypted. This is a
+  local IPC boundary, not a network service. Ante's adapter allows any connected
+  client to consume or purge; do not expose this profile.
+- The secure profile uses TLS with Argon2id credentials and exact queue
+  permissions. It is still a single-process trust boundary: settings are
+  restart-only, there is no mTLS/revocation/audit log, and the daemon's own
+  embedded engine is not subject to the external ACL.
 - Skills are trusted code. `run_shell` executes Bash as the daemon user with the
   skill workspace as cwd and the full configured environment (including secrets).
   There is no container, seccomp, or per-job UID isolation.
@@ -296,7 +309,9 @@ start recovers from the queue.
 - No automatic retention/GC for jobs, artifacts, or old revisions.
 - No `sd_notify` integration; readiness is CLI-checked.
 - No HTTP control API; the Unix socket is the only control surface.
-- No TLS/auth for AMQP; loopback only by policy.
+- TLS/auth is available but off by default; the legacy plaintext profile is
+  loopback-only by policy. Secure mode does not support mTLS, OAuth, revocation,
+  or hot rotation in v1.
 - Python threads cannot bypass the GIL. CPU-bound tools reduce actual parallel
   throughput; use subprocesses for CPU-heavy work.
 
@@ -312,6 +327,8 @@ The suite runs without paid model calls:
   revision binding across reload, init revision invalidation, control socket mode.
 - `test_cli*.py`: help/aliases, init/add/update/remove/list/show, live daemon
   commands, send, jobs, prepare, doctor, service wiring, backup, exit codes.
+- `test_security.py`: real TLS + Argon2id producer against the embedded listener,
+  success path, plaintext refusal, and wrong-password failure.
 - `test_config.py`, `test_registry.py`, `test_service.py`, `test_client.py`,
   `test_util.py`: schema, atomicity, immutability, unit rendering, socket
   protocol, locks, redaction.

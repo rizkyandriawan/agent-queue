@@ -209,7 +209,7 @@ rejected):
 
 ```yaml
 version: 1
-amqp: {host: 127.0.0.1, port: 5672}
+amqp: {host: 127.0.0.1, port: 5672, security: security.json}
 model: {name_env: AGENT_MODEL, api_key_env: AGENT_API_KEY, base_url_env: AGENT_BASE_URL}
 runtime:
   max_parallel_jobs: 8
@@ -233,6 +233,11 @@ routes:
     timeout_seconds: 300
     max_iterations: 30
 ```
+
+`amqp.security` is optional. When set, it points at an Ante security JSON file
+(relative to the daemon home) containing the TLS certificate/key and Argon2id
+user hashes. Secure ingress has no plaintext fallback; see
+[Secure AMQP ingress](#secure-amqp-ingress).
 
 `model.*_env` names point at environment variables, so credentials stay in
 `.env` (mode `0600`) or the process environment. `config show` redacts values
@@ -261,13 +266,63 @@ Exit codes: `0` success, `64` usage, `65` data/validation, `69` daemon or servic
 unavailable, `70` internal, `73` filesystem create, `74` I/O, `75` busy/timeout
 or not ready, `77` permission, `78` configuration.
 
+## Secure AMQP ingress
+
+Generate a CA and server certificate, then create `~/.agentqueue/security.json`:
+
+```json
+{
+  "tls": {"cert": "server.pem", "key": "server.key"},
+  "users": {
+    "producer": {
+      "password_hash": "$argon2id$...",
+      "permissions": {"publish": ["ticket.create"]}
+    },
+    "result-reader": {
+      "password_hash": "$argon2id$...",
+      "permissions": {
+        "consume": ["ticket.create.results", "ticket.create.failed"],
+        "inspect": ["ticket.create.results", "ticket.create.failed"]
+      }
+    }
+  }
+}
+```
+
+Set `amqp.security: security.json` in `config.yaml`, then restart. Requirements:
+
+- TLS is mandatory whenever users are configured; there is no plaintext
+  fallback on that listener.
+- Queue names are exact; wildcards are rejected.
+- The daemon's embedded engine still declares and consumes its own queues; the
+  security file governs **external** AMQP clients only.
+- Hash a password with Ante's CLI:
+  `printf '%s' 'secret' | ante hash-password`. The Ante binary must be available
+  in the environment used to provision the file.
+
+Send a secured message:
+
+```bash
+agentqueue send --topic ticket.create --message '{"id":42}' \
+  --tls-ca ca.pem --tls-server-name broker.internal \
+  --user producer --password-file producer.secret
+```
+
+Environment equivalents: `AGENTQUEUE_AMQP_CA`,
+`AGENTQUEUE_AMQP_SERVER_NAME`, `AGENTQUEUE_AMQP_USER`,
+`AGENTQUEUE_AMQP_PASSWORD`. The CLI refuses to publish to a secured ingress
+without a CA and credentials. `agentqueue status --json` exposes
+`daemon.amqp.tls`.
+
 ## Security model and limits
 
-- The AMQP listener is **unauthenticated and unencrypted** and binds loopback by
-  default. Do not expose it. Anyone who can reach it can publish, consume, or
-  purge. Ante's adapter also permits external `consume`/`purge`; a restricted
-  ingress profile is not implemented, so only trusted local processes should
-  share the port.
+- The default AMQP listener is **unauthenticated and unencrypted** and binds
+  loopback. Use the secure profile before exposing it. In secure mode, AMQP
+  requires TLS, verifies Argon2id credentials, and enforces queue-scoped
+  permissions. The native/embedded Ante database remains local to the daemon.
+- Anyone who can reach the legacy plaintext port can publish, consume, or purge.
+  Ante's adapter permits external `consume`/`purge`; bind it only to trusted
+  local processes.
 - The daemon runs as your user. Skills, `INIT.md`, and shell commands are trusted
   code execution, not a sandbox. Secrets in `.env` are inherited by shell
   commands; instructions should never print or persist them.
@@ -277,6 +332,8 @@ or not ready, `77` permission, `78` configuration.
   queue database; only the daemon does.
 - No automatic log rotation to a file by default (journald handles it). There is
   no built-in multi-user tenancy, HA, or distributed scheduling.
+- TLS certificates and security-file rotation require a daemon restart in v1;
+  `reload` warns that AMQP security changes need restart.
 
 ## Development
 
@@ -295,8 +352,8 @@ AgentScope tool execution, and a local HTTP API. Only model responses are
 scripted by a local OpenAI-compatible fixture. Tests cover init success/failure,
 restart reuse, retries with revision binding, terminal failure and manual retry,
 parallel capacity, pause/resume/reload, init revision invalidation, control
-socket permissions, CLI lifecycle, systemd rendering, backup, and client
-protocol errors.
+socket permissions, CLI lifecycle, systemd rendering, backup, client protocol
+errors, and a TLS + credential end-to-end send against the embedded listener.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the invariants and failure model.
 
