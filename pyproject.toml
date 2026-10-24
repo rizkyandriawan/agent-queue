@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 dependencies = [
-  "ante-embedded @ git+https://github.com/rizkyandriawan/ante-python.git@9c4038c",
+  "ante-embedded @ git+https://github.com/rizkyandriawan/ante-python.git@4a9a038",
   "agentscope==2.0.10",
   "python-dotenv>=1,<2",
   "pydantic>=2,<3",
