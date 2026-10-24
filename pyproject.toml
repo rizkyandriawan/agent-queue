@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-queue"
+version = "0.1.0"
+description = "Markdown-defined AgentScope automations triggered by an embedded Ante AMQP queue"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = [
+  "ante-embedded @ git+https://github.com/rizkyandriawan/ante-python.git@046877f6a2fefc8d4dc7c2734b3466a2dcca84ed",
+  "agentscope==2.0.10",
+  "python-dotenv>=1,<2",
+  "pydantic>=2,<3",
+  "PyYAML>=6,<7",
+  "pika>=1.3,<2",
+]
+
+[project.optional-dependencies]
+dev = ["coverage>=7", "ruff>=0.9"]
+
+[project.scripts]
+agentqueue = "agent_queue.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agent_queue = []
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
