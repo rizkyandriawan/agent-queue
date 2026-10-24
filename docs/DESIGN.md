@@ -150,19 +150,18 @@ workspace has been deleted, the job cannot be honored; the daemon logs
 
 Job records are audit/convenience data. Ante owns delivery. A missing or corrupt
 job file does not invent work; a redelivered message creates or appends to its
-record. Result publication happens before ack. If publication fails, the message
-is not acked and will be redelivered.
+record. Result publication and settlement happen in one Ante transaction. If the
+completion fails, the message is not settled and will be redelivered.
 
 ### Success
 
 1. Write the structured outcome to `artifacts/<job>/`.
-2. Publish a result to `<topic>.results` with metadata.
-3. Mark the attempt and job `succeeded`.
-4. Ack the delivery.
+2. Mark the attempt and job `succeeded`.
+3. Atomically publish the result to `<topic>.results` and settle the delivery.
 
-The result is durable before ack. A crash after publish but before ack can
-produce a duplicate result and re-execution; consumers must deduplicate on
-`job_id` or application idempotency keys.
+The result and delivery settlement commit together. If the process crashes
+before completion, the message is redelivered and the skill runs again; consumers
+must deduplicate on `job_id` or application idempotency keys.
 
 ### Retry
 
@@ -181,8 +180,9 @@ inside workers, and they do not hold an Ante lease past its timeout.
 ### Terminal failure
 
 When attempts are exhausted (or the error is not retryable, e.g. invalid
-workspace), the daemon publishes `<topic>.failed` with the original payload in
-base64 and error details, marks the job failed, then acks. `jobs retry <id>`
+workspace), the daemon marks the job failed and atomically publishes
+`<topic>.failed` with the original payload in base64 and error details while
+discarding the input delivery. `jobs retry <id>`
 republishes the stored payload as a new Ante message; the new job runs against
 the current route revision, because it is a new user-initiated attempt.
 

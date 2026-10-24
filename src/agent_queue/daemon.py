@@ -390,12 +390,6 @@ class RouteRuntime:
                 "correlation_id": delivery.correlation_id,
                 "finished_at": time.time(),
             }
-            self.daemon.ante.publish(
-                f"{self.topic}.results",
-                result,
-                content_type="application/json",
-                correlation_id=delivery.correlation_id,
-            )
             self.daemon.jobs.finish_attempt(
                 job_id,
                 attempt,
@@ -410,7 +404,12 @@ class RouteRuntime:
                 self.daemon.paths.artifacts / job_id,
                 {"phase": "message", "status": "succeeded", **result},
             )
-            delivery.ack()
+            delivery.complete(
+                f"{self.topic}.results",
+                result,
+                content_type="application/json",
+                correlation_id=delivery.correlation_id,
+            )
             event(
                 log,
                 logging.INFO,
@@ -498,12 +497,6 @@ class RouteRuntime:
             }
             try:
                 self.daemon.jobs.store_failure_payload(job_id, delivery.raw)
-                self.daemon.ante.publish(
-                    f"{self.topic}.failed",
-                    failure,
-                    content_type="application/json",
-                    correlation_id=delivery.correlation_id,
-                )
             except (AnteError, OSError) as publish_error:
                 event(
                     log,
@@ -518,14 +511,20 @@ class RouteRuntime:
                 {"phase": "message", **failure},
             )
             try:
-                delivery.ack()
-            except AnteError as ack_error:
+                delivery.complete(
+                    f"{self.topic}.failed",
+                    failure,
+                    content_type="application/json",
+                    correlation_id=delivery.correlation_id,
+                    discard=True,
+                )
+            except AnteError as complete_error:
                 event(
                     log,
                     logging.ERROR,
-                    "job.ack_failed",
+                    "job.failure_complete_error",
                     job_id=job_id,
-                    error=str(ack_error),
+                    error=str(complete_error),
                 )
             return
         delay = min(

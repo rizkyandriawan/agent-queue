@@ -182,9 +182,9 @@ plain AMQP; no SDK is required.
 - **Immutable revisions.** Route config pins a skill revision. Retries and
   in-flight jobs keep the revision and workspace bound on first dispatch, even
   after `update`/`reload`.
-- **Atomic outcomes.** Result records and `queue.sqlite3` are durable before the
-  delivery is acked. Outstanding retries are held by the daemon and requeued
-  when due, not spun on.
+- **Atomic outcomes.** A result is published and its input delivery settled in
+  one Ante transaction; artifacts and job records are written before it.
+  Outstanding retries are held by the daemon and requeued when due, not spun on.
 - **Concurrency.** Per-route `concurrency` and global `runtime.max_parallel_jobs`
   are both enforced; init concurrency is bounded separately.
 - **Shared workspace.** Routes using the same skill share its workspace
@@ -196,8 +196,8 @@ plain AMQP; no SDK is required.
 - **AMQP address changes require restart.** Reload warns instead of binding a
   new address underneath live routes.
 
-Results are published to `<topic>.results`; exhausted jobs go to
-`<topic>.failed` with the original payload in base64. Successful results include
+Results are published atomically with input settlement to `<topic>.results`;
+exhausted jobs go to `<topic>.failed` with the original payload in base64. Successful results include
 job id, topic, skill, revision, attempt, Ante message id, application message id,
 correlation id, and the agent's summary. `jobs retry <id>` republishes a failed
 job's stored payload; `--wait` follows the new job.
